@@ -1,3 +1,32 @@
+<<<<<<< HEAD
 node_modules/
 .next/
 *.node
+=======
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables - NEVER commit these
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Next.js
+.next/
+**/.next/
+out/
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+>>>>>>> Second-Half
