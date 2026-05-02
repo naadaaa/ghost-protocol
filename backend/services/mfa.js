@@ -14,7 +14,7 @@ const sendOtp = async (uid) => {
       channel: "sms",
     });
 
-  // Store PENDING state in Redis — 5 minute TTL
+  // Store pending state in Redis — 5 minute TTL
   const redis = await getRedis();
   await redis.setEx(`mfa:${uid}`, 300, "PENDING");
 

@@ -24,7 +24,7 @@ router.post("/login", verifyToken, async (req, res) => {
       io?.to(uid).emit("pulse", { type: "AUTH", message: `Returning user: ${email}`, ts: Date.now() });
     }
 
-    // Try MFA — if Twilio fails, skip it gracefully so we can still test
+    // Try MFA
     try {
       await sendOtp(uid);
       io?.to(uid).emit("pulse", { type: "TWILIO", message: `MFA challenge dispatched to ${process.env.MFA_PHONE_NUMBER}`, ts: Date.now() });
@@ -33,7 +33,7 @@ router.post("/login", verifyToken, async (req, res) => {
     } catch (twilioErr) {
       console.error("⚠️ Twilio MFA failed (skipping for now):", twilioErr.message);
       io?.to(uid).emit("pulse", { type: "TWILIO", message: `MFA skipped: ${twilioErr.message}`, ts: Date.now() });
-      // Skip MFA — go straight to SECURE so you can test the rest of the app
+
       return res.json({ status: "SECURE", user: { uid, displayName: name, email, photoURL: picture } });
     }
 

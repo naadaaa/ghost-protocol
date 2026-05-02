@@ -1,32 +1,181 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { getSocket } from "@/lib/socket";
+import { getUsers } from "@/lib/api";
+import GhostChat from "@/components/GhostChat";
+import PulseMonitor from "@/components/PulseMonitor";
+import ContactsList from "@/components/ContactsList";
 
 export default function ChatPage() {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [targetUser, setTargetUser] = useState(null);
+  const [pulseLog, setPulseLog] = useState([]);
+  const [presence, setPresence] = useState({});
+  const [socket, setSocket] = useState(null);
+  const [ttlSeconds, setTtlSeconds] = useState(120);
+  const presenceRef = useRef({});
   const router = useRouter();
+
+  const addPulse = (event) => {
+    setPulseLog((prev) => [...prev, event].slice(-100));
+  };
 
   useEffect(() => {
     const stored = localStorage.getItem("user");
-    if (!stored) {
+    const storedToken = localStorage.getItem("fbToken");
+    if (!stored || !storedToken) {
       router.push("/");
       return;
     }
-    setUser(JSON.parse(stored));
-  }, [router]);
+    const u = JSON.parse(stored);
+    setUser(u);
+    setToken(storedToken);
+
+    // Connect socket
+    const s = getSocket();
+    s.connect();
+
+    s.once("connect", () => {
+      s.emit("register", u.uid);
+    });
+
+    // Pulse events from backend
+    s.on("pulse", (event) => addPulse(event));
+
+    // ── Presence — update ref AND state so it always re-renders ──
+    s.on("presence", (data) => {
+      presenceRef.current = { ...presenceRef.current, [data.uid]: data.status };
+      setPresence({ ...presenceRef.current });
+    });
+
+    // Online list on first connect
+    s.on("onlineList", (list) => {
+      const map = {};
+      list.forEach((uid) => { map[uid] = "ACTIVE"; });
+      presenceRef.current = { ...presenceRef.current, ...map };
+      setPresence({ ...presenceRef.current });
+    });
+
+    setSocket(s);
+
+    // Load contacts
+    getUsers(storedToken).then(setUsers).catch(console.error);
+
+    return () => {
+      s.off("pulse");
+      s.off("presence");
+      s.off("onlineList");
+      s.disconnect();
+    };
+  }, []);
+
+  const handleLogout = () => {
+    socket?.disconnect();
+    localStorage.removeItem("user");
+    localStorage.removeItem("fbToken");
+    router.push("/");
+  };
 
   if (!user) return null;
 
   return (
-    <main className="min-h-screen bg-black text-green-400 flex flex-col items-center justify-center gap-4 p-8" style={{ fontFamily: "monospace" }}>
-      <h1 className="text-2xl tracking-widest">GHOST PROTOCOL</h1>
-      <p className="text-green-600 text-sm">ghost console initializing...</p>
-      <div className="border border-green-800 p-6 w-full max-w-md">
-        <p className="text-xs text-green-600">[AUTH CONSOLE]</p>
-        <p className="text-sm mt-2">✓ Logged in as: <span className="text-green-300">{user.displayName}</span></p>
-        <p className="text-sm">✓ Email: <span className="text-green-300">{user.email}</span></p>
-        <p className="text-sm">✓ UID: <span className="text-green-300 text-xs">{user.uid}</span></p>
-        <p className="text-xs text-green-700 mt-4">// chat module — coming soon (teammate's part)</p>
+    <main style={{
+      minHeight: "100vh",
+      background: "#000",
+      color: "#4ade80",
+      fontFamily: "monospace",
+      display: "flex",
+      flexDirection: "column",
+    }}>
+      {/* Top Bar */}
+      <div style={{
+        borderBottom: "1px solid #166534",
+        padding: "8px 16px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontSize: "12px",
+      }}>
+        <div>
+          <span style={{ color: "#4ade80", letterSpacing: "4px" }}>GHOST PROTOCOL</span>
+          <span style={{ color: "#166534", marginLeft: "16px" }}>ephemeral · verified · volatile</span>
+        </div>
+        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          <span style={{ color: "#6b7280" }}>{user.displayName}</span>
+          <span style={{ color: "#374151" }}>|</span>
+          <span style={{ color: "#166534", fontSize: "11px" }}>{user.uid.slice(0, 12)}...</span>
+          <button
+            onClick={handleLogout}
+            style={{
+              background: "transparent",
+              border: "1px solid #166534",
+              color: "#6b7280",
+              cursor: "pointer",
+              padding: "2px 8px",
+              fontFamily: "monospace",
+              fontSize: "11px",
+            }}
+          >
+            [LOGOUT]
+          </button>
+        </div>
+      </div>
+
+      {/* Main Layout */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+        {/* Left: Contacts */}
+        <div style={{
+          width: "200px",
+          borderRight: "1px solid #166534",
+          padding: "12px",
+          overflowY: "auto",
+          flexShrink: 0,
+        }}>
+          <ContactsList
+            users={users}
+            presence={presence}
+            currentTarget={targetUser}
+            onSelect={(u) => {
+              setTargetUser(u);
+              addPulse({ type: "SOCKET", message: `Opened channel with ${u.displayName}`, ts: Date.now() });
+            }}
+          />
+        </div>
+
+        {/* Center: Ghost Chat */}
+        <div style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          borderRight: "1px solid #166534",
+          overflow: "hidden",
+        }}>
+          <GhostChat
+            user={user}
+            token={token}
+            targetUser={targetUser}
+            socket={socket}
+            onPulse={addPulse}
+            ttlSeconds={ttlSeconds}
+            setTtlSeconds={setTtlSeconds}
+          />
+        </div>
+
+        {/* Right: System Pulse Monitor */}
+        <div style={{
+          width: "340px",
+          padding: "12px",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          flexShrink: 0,
+        }}>
+          <PulseMonitor logs={pulseLog} />
+        </div>
       </div>
     </main>
   );
